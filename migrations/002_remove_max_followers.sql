@@ -1,0 +1,9 @@
+-- Migration: Remove max_followers concept
+-- This migration removes the maximum follower count constraint.
+-- The role requirement now only uses minimum follower count.
+--
+-- No database schema changes needed as follower limits are stored in
+-- the conditions JSONB column of role_links table.
+-- 
+-- The configuration schema has been updated to only show min_followers field
+-- when require_followers toggle is enabled.

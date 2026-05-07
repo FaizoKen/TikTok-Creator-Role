@@ -1,0 +1,76 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8088:8088"
+    environment:
+      DATABASE_URL: postgres://tcr:password@db:5432/tiktok_creator_role
+      SESSION_SECRET: ${SESSION_SECRET}
+      TIKTOK_CLIENT_KEY: ${TIKTOK_CLIENT_KEY}
+      TIKTOK_CLIENT_SECRET: ${TIKTOK_CLIENT_SECRET}
+      BASE_URL: ${BASE_URL}
+      LISTEN_ADDR: "0.0.0.0:8088"
+      AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      TIKTOK_QUOTA_PER_DAY: ${TIKTOK_QUOTA_PER_DAY:-200000}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  db:
+    image: postgres:16-alpine
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c work_mem=2MB
+      -c maintenance_work_mem=32MB
+      -c effective_cache_size=128MB
+      -c max_connections=15
+      -c wal_buffers=4MB
+      -c checkpoint_completion_target=0.9
+      -c random_page_cost=1.1
+    environment:
+      POSTGRES_DB: tiktok_creator_role
+      POSTGRES_USER: tcr
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: '64m'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tcr -d tiktok_creator_role"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  db-backup:
+    image: postgres:16-alpine
+    restart: always
+    depends_on:
+      - db
+    volumes:
+      - ./backups:/backups
+      - /tmp:/var/lib/postgresql/data
+    environment:
+      PGPASSWORD: password
+    entrypoint: |
+      bash -c '
+      while true; do
+        echo "[$(date)] Running database backup..."
+        pg_dump -h db -U tcr tiktok_creator_role | gzip > /backups/tiktok_creator_role-$(date +%F_%H-%M-%S).sql.gz
+        echo "[$(date)] Backup complete."
+        find /backups -type f -mtime +7 -delete
+        sleep 24h
+      done
+      '
+
+volumes:
+  pgdata:
