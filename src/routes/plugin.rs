@@ -61,16 +61,22 @@ pub async fn get_config(
 ) -> Result<Json<Value>, AppError> {
     let token = extract_token(&headers)?;
 
-    let row = sqlx::query_as::<_, (sqlx::types::Json<TikTokConditions>,)>(
-        "SELECT conditions FROM role_links WHERE api_token = $1",
+    let row = sqlx::query_as::<_, (String, sqlx::types::Json<TikTokConditions>)>(
+        "SELECT guild_id, conditions FROM role_links WHERE api_token = $1",
     )
     .bind(&token)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::Unauthorized)?;
 
-    let conditions = row.0;
-    let verify_url = format!("{}/verify", state.config.base_url);
+    let guild_id = row.0;
+    let conditions = row.1;
+    // Per-guild verify URL. The `?guild=<id>` query param lets the verify
+    // page show "Verifying for <Server>" context and auto-clear any
+    // existing opt-out so a member who previously disabled this server
+    // is re-enrolled in one click. Guild IDs are Discord snowflakes
+    // (digits only) so they're safe to splice directly into the URL.
+    let verify_url = format!("{}/verify?guild={}", state.config.base_url, guild_id);
 
     let schema_json = schema::build_config_schema(&conditions, &verify_url);
 
