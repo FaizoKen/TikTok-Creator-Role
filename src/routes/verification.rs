@@ -202,7 +202,7 @@ pub fn render_verify_page(base_url: &str) -> String {
         if (!guildId) return;
         let prefs;
         try {{
-            prefs = await gatewayApi('GET', '/auth/preferences');
+            prefs = await gatewayApi('GET', '/auth/preferences?ensure_guild=' + encodeURIComponent(guildId));
         }} catch (e) {{
             return;
         }}
