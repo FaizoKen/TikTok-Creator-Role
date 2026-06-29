@@ -249,9 +249,10 @@ impl TikTokClient {
             )));
         }
 
-        let body: UserInfoEnvelope = resp.json().await.map_err(|e| {
-            AppError::TikTokApi(format!("user_info response not JSON: {e}"))
-        })?;
+        let body: UserInfoEnvelope = resp
+            .json()
+            .await
+            .map_err(|e| AppError::TikTokApi(format!("user_info response not JSON: {e}")))?;
 
         if let Some(err) = body.error.as_ref() {
             // The Display API always returns an `error` object — `code: "ok"` means success.

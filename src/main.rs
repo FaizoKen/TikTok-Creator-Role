@@ -61,8 +61,9 @@ async fn main() {
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("Failed to build HTTP client");
-    let verify_html =
-        bytes::Bytes::from(routes::verification::render_verify_page(&app_config.base_url));
+    let verify_html = bytes::Bytes::from(routes::verification::render_verify_page(
+        &app_config.base_url,
+    ));
 
     let state = Arc::new(AppState {
         pool,
@@ -77,8 +78,14 @@ async fn main() {
 
     // Background workers — all spawned, none crash on error (Convention 9).
     tokio::spawn(tasks::refresh_worker::run(Arc::clone(&state)));
-    tokio::spawn(tasks::player_sync_worker::run(player_sync_rx, Arc::clone(&state)));
-    tokio::spawn(tasks::config_sync_worker::run(config_sync_rx, Arc::clone(&state)));
+    tokio::spawn(tasks::player_sync_worker::run(
+        player_sync_rx,
+        Arc::clone(&state),
+    ));
+    tokio::spawn(tasks::config_sync_worker::run(
+        config_sync_rx,
+        Arc::clone(&state),
+    ));
     tokio::spawn(tasks::cleanup_expired(Arc::clone(&state)));
 
     // All routes are nested under the plugin's path prefix (Convention 23).

@@ -401,9 +401,9 @@ pub async fn tiktok_callback(
             "TikTok OAuth was cancelled or failed: {err} - {desc}"
         )));
     }
-    let code = query
-        .code
-        .ok_or_else(|| AppError::BadRequest("Missing authorization code in TikTok callback".into()))?;
+    let code = query.code.ok_or_else(|| {
+        AppError::BadRequest("Missing authorization code in TikTok callback".into())
+    })?;
 
     // Validate state and recover discord_id.
     let row = sqlx::query_as::<_, (String,)>(

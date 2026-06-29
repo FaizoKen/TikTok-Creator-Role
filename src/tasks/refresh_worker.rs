@@ -42,11 +42,10 @@ impl CachedInterval {
     async fn get(&self, pool: &sqlx::PgPool, quota_per_day: i64) -> i64 {
         let mut last = self.last_computed.lock().await;
         if last.elapsed() >= std::time::Duration::from_secs(INTERVAL_CACHE_SECS) {
-            let cache_count: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM tiktok_stats_cache")
-                    .fetch_one(pool)
-                    .await
-                    .unwrap_or(0);
+            let cache_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tiktok_stats_cache")
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0);
 
             let interval = if cache_count == 0 || quota_per_day <= 0 {
                 MIN_REFRESH_SECS
@@ -236,9 +235,8 @@ async fn refresh_one_user(state: &AppState, discord_id: &str) -> Result<TikTokUs
     }
 
     // Proactive refresh if the access token is within REFRESH_BUFFER_SECS of expiry.
-    let needs_refresh = chrono::Utc::now()
-        + chrono::Duration::seconds(REFRESH_BUFFER_SECS)
-        >= token_expires_at;
+    let needs_refresh =
+        chrono::Utc::now() + chrono::Duration::seconds(REFRESH_BUFFER_SECS) >= token_expires_at;
 
     let mut already_refreshed = false;
     if needs_refresh {

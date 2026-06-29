@@ -75,7 +75,10 @@ pub async fn sync_for_player(discord_id: &str, state: &AppState) -> Result<(), A
         return Ok(());
     }
 
-    let role_links = sqlx::query_as::<_, (String, String, String, sqlx::types::Json<TikTokConditions>)>(
+    let role_links = sqlx::query_as::<
+        _,
+        (String, String, String, sqlx::types::Json<TikTokConditions>),
+    >(
         "SELECT guild_id, role_id, api_token, conditions FROM role_links WHERE guild_id = ANY($1)",
     )
     .bind(&guild_ids[..])
@@ -310,17 +313,16 @@ pub async fn sync_for_role_link(
         return Ok(());
     }
 
-    let (_user_count, user_limit) = match rl_client
-        .get_user_info(guild_id, role_id, &api_token)
-        .await
-    {
-        Ok(v) => v,
-        Err(AppError::RoleLinkNotFound) => {
-            delete_orphan_role_link(guild_id, role_id, pool).await;
-            return Ok(());
-        }
-        Err(_) => (0, 100),
-    };
+    let (_user_count, user_limit) =
+        match rl_client.get_user_info(guild_id, role_id, &api_token).await {
+            Ok(v) => v,
+            Err(AppError::RoleLinkNotFound) => {
+                delete_orphan_role_link(guild_id, role_id, pool).await;
+                return Ok(());
+            }
+            Err(AppError::RoleLinkDisabled) => return Ok(()),
+            Err(e) => return Err(e),
+        };
 
     let (where_clause, binds) = build_condition_where(&conditions);
 
@@ -339,7 +341,8 @@ pub async fn sync_for_role_link(
          LIMIT ${limit_bind_idx}",
     );
 
-    let qualifying_ids = exec_condition_query(&query_str, &binds, &member_ids, user_limit, pool).await?;
+    let qualifying_ids =
+        exec_condition_query(&query_str, &binds, &member_ids, user_limit, pool).await?;
 
     if !qualifying_ids.is_empty() && qualifying_ids.len() == user_limit {
         let count_query = format!(
@@ -457,7 +460,12 @@ pub async fn remove_all_assignments(discord_id: &str, state: &AppState) -> Resul
                 delete_orphan_role_link(guild_id, role_id, pool).await;
             }
             Err(e) => {
-                tracing::error!(guild_id, role_id, discord_id, "Failed to remove user during unlink: {e}");
+                tracing::error!(
+                    guild_id,
+                    role_id,
+                    discord_id,
+                    "Failed to remove user during unlink: {e}"
+                );
             }
         }
     }

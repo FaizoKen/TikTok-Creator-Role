@@ -39,7 +39,11 @@ pub async fn run(mut rx: mpsc::Receiver<ConfigSyncEvent>, state: Arc<AppState>) 
         for key in ready {
             pending.remove(&key);
             let (guild_id, role_id) = &key;
-            tracing::debug!(guild_id, role_id, "Syncing roles for config change (debounced)");
+            tracing::debug!(
+                guild_id,
+                role_id,
+                "Syncing roles for config change (debounced)"
+            );
 
             if let Err(e) = sync::sync_for_role_link(guild_id, role_id, &state).await {
                 tracing::error!(guild_id, role_id, "Config sync failed: {e}");
