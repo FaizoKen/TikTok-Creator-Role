@@ -16,6 +16,22 @@ const DEBOUNCE_SECS: u64 = 5;
 /// is also kept in `role_links.held_recheck_at`, so a restart resumes it.
 const HELD_RECHECK_SECS: u64 = 20 * 60;
 
+/// A sync that fails is tried again a minute later, then after twice as long
+/// for each further failure, up to 30 min. Without this a single dropped
+/// connection lost the sync for good: an owner's save never reached
+/// RoleLogic, and a held link's re-checks stopped until a restart.
+const RETRY_FIRST_SECS: u64 = 60;
+const RETRY_MAX_SECS: u64 = 30 * 60;
+/// Failures in a row that log as warnings. A network blip heals on its first
+/// retry; the failure after these lands about 15 min in and logs an error.
+const QUIET_FAILURES: u32 = 4;
+
+/// How long to wait after the `failures`-th failure in a row.
+fn retry_delay(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(16);
+    Duration::from_secs((RETRY_FIRST_SECS << doublings).min(RETRY_MAX_SECS))
+}
+
 pub async fn run(mut rx: mpsc::Receiver<ConfigSyncEvent>, state: Arc<AppState>) {
     tracing::info!("Config sync worker started");
 
@@ -25,6 +41,8 @@ pub async fn run(mut rx: mpsc::Receiver<ConfigSyncEvent>, state: Arc<AppState>) 
     let mut pending: HashMap<(String, String), Instant> = HashMap::new();
     let debounce = Duration::from_secs(DEBOUNCE_SECS);
     let held_recheck = Duration::from_secs(HELD_RECHECK_SECS);
+    // Failures in a row per link, cleared by the next sync that settles.
+    let mut failures: HashMap<(String, String), u32> = HashMap::new();
 
     // Re-checks booked before the last restart. Without them a held link
     // would not be re-sent until its config changed, and an owner's
@@ -65,11 +83,15 @@ pub async fn run(mut rx: mpsc::Receiver<ConfigSyncEvent>, state: Arc<AppState>) 
 
             match sync::sync_for_role_link(guild_id, role_id, &state).await {
                 // Written, or nothing to write: whatever was held is settled.
-                Ok(()) => clear_held_recheck(&state, guild_id, role_id).await,
+                Ok(()) => {
+                    failures.remove(&key);
+                    clear_held_recheck(&state, guild_id, role_id).await;
+                }
                 // A decision waiting on a person, not a failure: leave the
                 // local mirror as it was and look again later, recomputing
                 // the list then.
                 Err(AppError::RemovalHeld) => {
+                    failures.remove(&key);
                     tracing::info!(
                         guild_id,
                         role_id,
@@ -81,9 +103,30 @@ pub async fn run(mut rx: mpsc::Receiver<ConfigSyncEvent>, state: Arc<AppState>) 
                         .or_insert(Instant::now() + held_recheck);
                     book_held_recheck(&state, guild_id, role_id).await;
                 }
-                // A booked re-check stays booked: a restart retries it.
+                // Try again later, recomputing the list then. A held link's
+                // booking stays as it was, so a restart still resumes it.
                 Err(e) => {
-                    tracing::error!(guild_id, role_id, "Config sync failed: {e}");
+                    let failed = failures.entry(key.clone()).or_insert(0);
+                    *failed += 1;
+                    let wait = retry_delay(*failed);
+                    pending.entry(key.clone()).or_insert(Instant::now() + wait);
+                    if *failed > QUIET_FAILURES {
+                        tracing::error!(
+                            guild_id,
+                            role_id,
+                            failures = *failed,
+                            "Config sync keeps failing; retrying in {} min: {e}",
+                            wait.as_secs() / 60
+                        );
+                    } else {
+                        tracing::warn!(
+                            guild_id,
+                            role_id,
+                            failures = *failed,
+                            "Config sync failed; retrying in {} min: {e}",
+                            wait.as_secs() / 60
+                        );
+                    }
                 }
             }
         }
@@ -154,5 +197,24 @@ async fn clear_held_recheck(state: &AppState, guild_id: &str, role_id: &str) {
     .await
     {
         tracing::warn!(guild_id, role_id, "Could not clear the held re-check: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retries_back_off_to_the_cap() {
+        let mins: Vec<u64> = (1..=8).map(|n| retry_delay(n).as_secs() / 60).collect();
+        assert_eq!(mins, [1, 2, 4, 8, 16, 30, 30, 30]);
+        assert_eq!(retry_delay(u32::MAX), Duration::from_secs(RETRY_MAX_SECS));
+    }
+
+    #[test]
+    fn the_first_error_lands_about_15_min_in() {
+        // Attempts run at 0, 1, 3, 7 and 15 min; the fifth failure logs an error.
+        let before_error: u64 = (1..=QUIET_FAILURES).map(|n| retry_delay(n).as_secs()).sum();
+        assert_eq!(before_error, 15 * 60);
     }
 }
